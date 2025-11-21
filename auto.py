@@ -13,7 +13,7 @@ FROM_CITY = "Dhaka"
 TO_CITY = "Cox's Bazar"
 DOJ = "29-Nov-2025"
 
-SEAT_CLASS = "SNIGDHA"
+SEAT_CLASS = "AC_S"
 TARGET_TRAIN = "PARJOTAK EXPRESS (816)"
 SEATS_TO_SELECT = 4
 
@@ -22,6 +22,8 @@ PASSENGERS = [
     {"name": "Jane Smith", "type": "1"},  # Passenger 3
     {"name": "Bob Johnson", "type": "2"}  # Passenger 4
 ]
+
+PAYMENT_METHOD = "bkash"  # Options: "bkash", "nagad", "rocket"
 
 LOGIN_URL = "https://eticket.railway.gov.bd/login"
 SEARCH_URL = f"https://eticket.railway.gov.bd/booking/train/search?fromcity={FROM_CITY}&tocity={TO_CITY}&doj={DOJ}&class={SEAT_CLASS}"
@@ -32,6 +34,13 @@ options.add_argument("--no-first-run")
 options.add_argument("--no-default-browser-check")
 options.add_argument("--disable-blink-features=AutomationControlled")
 
+# Auto-allow location
+prefs = {
+    "profile.default_content_setting_values.geolocation": 1  # 1 = allow, 2 = block
+}
+options.add_experimental_option("prefs", prefs)
+
+# Launch Chrome without persistent profile
 driver = uc.Chrome(options=options)
 wait = WebDriverWait(driver, 15)
 
@@ -43,13 +52,10 @@ driver.delete_all_cookies()
 try:
     mobile_field = wait.until(EC.presence_of_element_located((By.ID, "mobile_number")))
     mobile_field.send_keys(MOBILE)
-
     pass_field = wait.until(EC.presence_of_element_located((By.ID, "password")))
     pass_field.send_keys(PASSWORD)
-
     login_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".login-form-submit-btn")))
     driver.execute_script("arguments[0].click();", login_btn)
-
     time.sleep(3)
     print("✔ Login successful")
 except Exception as e:
@@ -80,7 +86,6 @@ if not train_rows:
     print("❌ No trains found")
     driver.quit()
     exit()
-
 print(f"✔ Found {len(train_rows)} trains")
 
 target_row = None
@@ -93,7 +98,6 @@ for row in train_rows:
             break
     except:
         continue
-
 if not target_row:
     print("❌ Train not found:", TARGET_TRAIN)
     driver.quit()
@@ -103,7 +107,6 @@ if not target_row:
 seat_rows = target_row.find_elements(By.CSS_SELECTOR, ".seat-available-wrap")
 selected_seat = None
 max_seats = 0
-
 for seat in seat_rows:
     try:
         name = seat.find_element(By.CSS_SELECTOR, ".seat-class-name").text.strip()
@@ -113,12 +116,10 @@ for seat in seat_rows:
             max_seats = seats_available
     except:
         continue
-
 if not selected_seat:
     print(f"❌ Seat class '{SEAT_CLASS}' not found inside train.")
     driver.quit()
     exit()
-
 print(f"✔ Selected seat class {SEAT_CLASS} with {max_seats} available")
 
 # ---------------- CLICK BOOK NOW ----------------
@@ -130,19 +131,16 @@ time.sleep(3)
 # ---------------- COACH SELECTION ----------------
 try:
     coach_select = wait.until(EC.presence_of_element_located((By.ID, "select-bogie")))
-    options = coach_select.find_elements(By.TAG_NAME, "option")
-
+    options_list = coach_select.find_elements(By.TAG_NAME, "option")
     chosen_option = None
-    for opt in options:
+    for opt in options_list:
         if "0 Seat(s)" not in opt.text:
             chosen_option = opt
             break
-
     if not chosen_option:
         print("❌ No coach with seats available.")
         driver.quit()
         exit()
-
     driver.execute_script("arguments[0].selected = true;", chosen_option)
     chosen_option.click()
     print("✔ Coach selected:", chosen_option.text)
@@ -159,41 +157,16 @@ try:
         print("❌ Not enough seats available")
         driver.quit()
         exit()
-
     for i in range(SEATS_TO_SELECT):
         btn = seat_buttons[i]
         driver.execute_script("arguments[0].click();", btn)
         print("✔ Seat selected:", btn.get_attribute("title"))
         time.sleep(0.3)
-
     print(f"✔ Successfully selected {SEATS_TO_SELECT} seats")
 except Exception as e:
     print("❌ Seat selection failed:", e)
     driver.quit()
     exit()
-
-# ---------------- FETCH SELECTED SEAT DETAILS ----------------
-try:
-    time.sleep(1)
-    seat_table_elements = driver.find_elements(By.ID, "tbl_seat_list")
-    if seat_table_elements:
-        seat_table = seat_table_elements[0]
-        rows = seat_table.find_elements(By.CSS_SELECTOR, "tr.seat-info-row, tr.seat-info-row-last")
-        seat_details = []
-        for row in rows:
-            cells = row.find_elements(By.TAG_NAME, "td")
-            seat_details.append({
-                "class": cells[0].text.strip(),
-                "number": cells[1].text.strip(),
-                "fare": cells[2].text.strip()
-            })
-        print("✔ Selected seat details:")
-        for s in seat_details:
-            print(f"  - {s['class']} | {s['number']} | {s['fare']}")
-    else:
-        print("⚠ Seat table not found")
-except Exception as e:
-    print("❌ Could not fetch seat details:", e)
 
 # ---------------- CLICK CONTINUE PURCHASE ----------------
 try:
@@ -226,28 +199,45 @@ try:
         if i >= len(passenger_forms):
             print(f"⚠ Only {len(passenger_forms)} passenger forms found, expected at least {i+1}")
             break
-
         form = passenger_forms[i]
-
-        # Fill Name
         name_input = form.find_element(By.CSS_SELECTOR, "input[formcontrolname='full_name']")
         name_input.clear()
         name_input.send_keys(passenger['name'])
-        print(f"✔ Passenger {i+1} Name filled: {passenger['name']}")
-
-        # Select Passenger Type
         type_select = form.find_element(By.CSS_SELECTOR, "select[formcontrolname='passenger_type']")
         driver.execute_script(
             "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change'))",
             type_select, passenger['type']
         )
-        print(f"✔ Passenger {i+1} Type selected: {'Adult' if passenger['type']=='1' else 'Child'}")
-
+        print(f"✔ Passenger {i+1} Name & Type filled: {passenger['name']} / {'Adult' if passenger['type']=='1' else 'Child'}")
     print("✔ All passenger details filled successfully")
 except Exception as e:
     print("❌ Could not fill passenger details:", e)
 
+# ---------------- SELECT PAYMENT METHOD ----------------
+try:
+    payment_section = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.ID, "mobileBanking"))
+    )
+    payment_btn = payment_section.find_element(
+        By.CSS_SELECTOR, f"div.payment-icon-holder.{PAYMENT_METHOD}"
+    )
+    driver.execute_script("arguments[0].click();", payment_btn)
+    print(f"✔ Payment method selected: {PAYMENT_METHOD.capitalize()}")
+    
+    proceed_btn = driver.find_element(By.CSS_SELECTOR, "#confirm_button")
+    driver.execute_script("arguments[0].click();", proceed_btn)
+    print("✔ Proceeded to payment page")
+except Exception as e:
+    print("❌ Payment selection failed:", e)
+
+# ---------------- MANUAL bKash PAYMENT ----------------
+if PAYMENT_METHOD.lower() == "bkash":
+    print("⚠ bKash payment modal opened.")
+    print("📌 PLEASE complete the bKash payment manually in the popup window.")
+    input("Press Enter here AFTER payment is done...")
+    print("✔ Payment completed manually.")
+
 # ---------------- END ----------------
-print("🎉 FLOW COMPLETE — Passenger details page is ready.")
+print("🎉 FLOW COMPLETE — All steps done.")
 input("Press Enter to exit...")
 driver.quit()
